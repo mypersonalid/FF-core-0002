@@ -4,10 +4,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport"
-      content="width=device-width, initial-scale=1.0,
-      maximum-scale=1.0, user-scalable=no">
-
-<title>Drag Skeleton Creature</title>
+ content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Realistic Drag Snake</title>
 
 <style>
 * {
@@ -20,18 +18,13 @@ html, body {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #0b1118;
-  font-family: Arial, sans-serif;
+  background: #080d12;
   touch-action: none;
 }
 
 #stage {
   position: fixed;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 12px;
+  inset: 8px;
 }
 
 canvas {
@@ -40,7 +33,7 @@ canvas {
   height: 100%;
   background: #f4f7f7;
   border: 2px solid #263039;
-  border-radius: 10px;
+  border-radius: 9px;
   touch-action: none;
   cursor: grab;
 }
@@ -49,18 +42,18 @@ canvas:active {
   cursor: grabbing;
 }
 
-#hint {
+#info {
   position: fixed;
-  bottom: 24px;
+  bottom: 22px;
   left: 50%;
   transform: translateX(-50%);
-  color: #fff;
-  background: #202a32dd;
-  padding: 10px 16px;
-  border-radius: 20px;
-  font-size: 13px;
-  pointer-events: none;
+  background: #101820e8;
+  color: white;
+  font: 13px Arial, sans-serif;
+  padding: 10px 15px;
+  border-radius: 24px;
   white-space: nowrap;
+  pointer-events: none;
 }
 </style>
 </head>
@@ -70,27 +63,26 @@ canvas:active {
   <canvas id="canvas"></canvas>
 </div>
 
-<div id="hint">আঙুল দিয়ে ড্র্যাগ করে মুভ করো</div>
+<div id="info">আঙুল দিয়ে ড্র্যাগ করে সাপটিকে চালাও</div>
 
 <script>
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
-const hint = document.getElementById("hint");
+const info = document.getElementById("info");
 
-let W = 0;
-let H = 0;
+let W = 0, H = 0;
 let time = 0;
-
-let creatureX = 0;
-let creatureY = 0;
-
 let dragging = false;
 let pointerId = null;
-let lastX = 0;
-let lastY = 0;
 
-const CREATURE_WIDTH = 0.76;
-const CREATURE_HEIGHT = 0.43;
+const snake = [];
+const SEGMENTS = 48;
+
+let target = { x: 0, y: 0 };
+let headAngle = 0;
+let spacing = 8;
+let bodyWidth = 7;
+let speed = 3.5;
 
 function resize() {
   const rect = canvas.getBoundingClientRect();
@@ -104,25 +96,136 @@ function resize() {
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-  keepInside();
+  spacing = Math.max(5, Math.min(W, H) * 0.012);
+  bodyWidth = Math.max(3, Math.min(W, H) * 0.009);
+  speed = Math.max(2, Math.min(5, Math.min(W, H) * 0.006));
+
+  initializeSnake();
 }
 
-window.addEventListener("resize", resize);
+function initializeSnake() {
+  snake.length = 0;
 
-// মূল প্রাণীর অবস্থান ও আকৃতি
-function spine(u, t) {
-  const x = -W * CREATURE_WIDTH / 2
-          + u * W * CREATURE_WIDTH;
+  const startX = W * 0.43;
+  const startY = H * 0.5;
 
-  const y =
-      -Math.sin(u * Math.PI * 1.3) * H * 0.20
-      + Math.sin(u * 5 + t * 0.7) * 7
-      + Math.sin(u * 8 + t) * 4;
+  for (let i = 0; i < SEGMENTS; i++) {
+    snake.push({
+      x: startX - i * spacing,
+      y: startY,
+      angle: 0
+    });
+  }
 
-  return { x, y };
+  target.x = startX;
+  target.y = startY;
+  headAngle = 0;
 }
 
-function line(x1, y1, x2, y2, width = 2) {
+// কোণের পার্থক্য মসৃণ করা
+function angleDifference(a, b) {
+  return Math.atan2(Math.sin(b - a), Math.cos(b - a));
+}
+
+function getPointer(e) {
+  const rect = canvas.getBoundingClientRect();
+
+  return {
+    x: e.clientX - rect.left,
+    y: e.clientY - rect.top
+  };
+}
+
+// আঙুল বা মাউসের অবস্থান
+canvas.addEventListener("pointerdown", e => {
+  dragging = true;
+  pointerId = e.pointerId;
+  target = getPointer(e);
+
+  canvas.setPointerCapture(e.pointerId);
+
+  info.textContent = "সাপটি তোমার আঙুল অনুসরণ করছে";
+});
+
+canvas.addEventListener("pointermove", e => {
+  if (!dragging || e.pointerId !== pointerId) return;
+  target = getPointer(e);
+});
+
+function stopDrag(e) {
+  if (e.pointerId !== pointerId) return;
+
+  dragging = false;
+  pointerId = null;
+
+  info.textContent = "আবার ড্র্যাগ করে দিক পরিবর্তন করো";
+}
+
+canvas.addEventListener("pointerup", stopDrag);
+canvas.addEventListener("pointercancel", stopDrag);
+
+canvas.addEventListener("lostpointercapture", () => {
+  dragging = false;
+  pointerId = null;
+});
+
+// মাথা ও শরীরের মুভমেন্ট
+function updateSnake() {
+  const head = snake[0];
+
+  if (dragging) {
+    const dx = target.x - head.x;
+    const dy = target.y - head.y;
+    const distance = Math.hypot(dx, dy);
+
+    if (distance > 2) {
+      const desiredAngle = Math.atan2(dy, dx);
+
+      headAngle += angleDifference(
+        headAngle,
+        desiredAngle
+      ) * 0.13;
+
+      const step = Math.min(speed, distance * 0.15 + 0.4);
+
+      head.x += Math.cos(headAngle) * step;
+      head.y += Math.sin(headAngle) * step;
+    }
+  }
+
+  head.x = Math.max(5, Math.min(W - 5, head.x));
+  head.y = Math.max(5, Math.min(H - 5, head.y));
+  head.angle = headAngle;
+
+  // প্রতিটি অংশ তার আগের অংশ অনুসরণ করে
+  for (let i = 1; i < snake.length; i++) {
+    const prev = snake[i - 1];
+    const current = snake[i];
+
+    const dx = current.x - prev.x;
+    const dy = current.y - prev.y;
+    const distance = Math.hypot(dx, dy) || 1;
+
+    const angle = Math.atan2(dy, dx);
+
+    const desiredX = prev.x + dx / distance * spacing;
+    const desiredY = prev.y + dy / distance * spacing;
+
+    current.x += (desiredX - current.x) * 0.48;
+    current.y += (desiredY - current.y) * 0.48;
+
+    current.angle = angleDifference(
+      current.angle || angle,
+      Math.atan2(
+        prev.y - current.y,
+        prev.x - current.x
+      )
+    ) * 0.15 + angle * 0.85;
+  }
+}
+
+// লাইন আঁকা
+function drawLine(x1, y1, x2, y2, width = 2) {
   ctx.beginPath();
   ctx.moveTo(x1, y1);
   ctx.lineTo(x2, y2);
@@ -133,245 +236,171 @@ function line(x1, y1, x2, y2, width = 2) {
   ctx.stroke();
 }
 
-function joint(x, y, radius = 2.5) {
+function drawJoint(x, y, r = 2) {
   ctx.beginPath();
-  ctx.arc(x, y, radius, 0, Math.PI * 2);
-  ctx.fillStyle = "#171b1b";
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = "#202525";
   ctx.fill();
 }
 
-// মেরুদণ্ডের পাশের পাঁজর
-function drawRibs(u, t) {
-  const p = spine(u, t);
-  const before = spine(Math.max(0, u - 0.005), t);
-  const after = spine(Math.min(1, u + 0.005), t);
+// সাপের মেরুদণ্ড ও পাঁজর
+function drawBody() {
+  const len = snake.length;
 
-  const dx = after.x - before.x;
-  const dy = after.y - before.y;
-  const len = Math.hypot(dx, dy) || 1;
-
-  const nx = -dy / len;
-  const ny = dx / len;
-
-  const size = Math.min(W, H) * 0.025;
-
-  for (const side of [-1, 1]) {
-    const x1 = p.x + nx * size * side;
-    const y1 = p.y + ny * size * side;
-
-    const x2 = p.x + nx * size * 1.8 * side + dx * 0.3;
-    const y2 = p.y + ny * size * 1.8 * side + dy * 0.3;
-
-    const x3 = p.x + nx * size * 2.1 * side + dx * 0.8;
-    const y3 = p.y + ny * size * 2.1 * side + dy * 0.8;
-
-    ctx.beginPath();
-    ctx.moveTo(p.x, p.y);
-    ctx.quadraticCurveTo(x1, y1, x2, y2);
-    ctx.lineTo(x3, y3);
-
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = "#303333";
-    ctx.stroke();
-  }
-}
-
-// দুই পাশের কোণাকুণি পা
-function drawLeg(u, side, t, index) {
-  const p = spine(u, t);
-  const scale = Math.min(W, H);
-
-  const sway = Math.sin(t * 2 + index * 1.7) * scale * 0.012;
-
-  const x1 = p.x + sway;
-  const y1 = p.y + side * scale * 0.012;
-
-  const x2 = x1 + Math.sin(index * 2.4 + t) * scale * 0.018
-                 + scale * 0.018;
-
-  const y2 = y1 + side * scale * 0.045;
-
-  const x3 = x2 - scale * 0.012
-                 + Math.sin(t * 2 + index) * scale * 0.008;
-
-  const y3 = y2 + side * scale * 0.035;
-
-  const x4 = x3 + scale * 0.012;
-  const y4 = y3 + side * scale * 0.002;
-
-  line(x1, y1, x2, y2, 2);
-  line(x2, y2, x3, y3, 2);
-  line(x3, y3, x4, y4, 2);
-
-  joint(x2, y2, 2);
-  joint(x4, y4, 2.5);
-}
-
-// সম্পূর্ণ প্রাণী
-function drawCreature(t) {
-  const count = 180;
-
-  // মূল মেরুদণ্ড
+  // মেরুদণ্ড
   ctx.beginPath();
 
-  for (let i = 0; i <= count; i++) {
-    const p = spine(i / count, t);
-
+  snake.forEach((p, i) => {
     if (i === 0) ctx.moveTo(p.x, p.y);
     else ctx.lineTo(p.x, p.y);
-  }
+  });
 
-  ctx.strokeStyle = "#292d2d";
-  ctx.lineWidth = 4;
+  ctx.strokeStyle = "#242929";
+  ctx.lineWidth = bodyWidth;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
   ctx.stroke();
 
-  // মেরুদণ্ডের হাড়
-  for (let i = 0; i <= 52; i++) {
-    const u = i / 52;
-    const p = spine(u, t);
-    const before = spine(Math.max(0, u - 0.004), t);
-    const after = spine(Math.min(1, u + 0.004), t);
+  for (let i = 1; i < len - 1; i++) {
+    const p = snake[i];
+    const prev = snake[i - 1];
+    const next = snake[i + 1];
 
     const angle = Math.atan2(
-      after.y - before.y,
-      after.x - before.x
+      next.y - prev.y,
+      next.x - prev.x
     );
+
+    const fade = 1 - i / len;
+    const ribLength = spacing * (1.7 + fade * 0.4);
 
     ctx.save();
     ctx.translate(p.x, p.y);
     ctx.rotate(angle);
 
+    // প্রতিটি কশেরুকা
     ctx.beginPath();
-    ctx.ellipse(0, 0, 3, Math.min(W, H) * 0.022,
-                0, 0, Math.PI * 2);
+    ctx.ellipse(
+      0, 0,
+      bodyWidth * 0.75,
+      spacing * 0.65,
+      0, 0, Math.PI * 2
+    );
+    ctx.fillStyle = "#3b4040";
+    ctx.fill();
 
-    ctx.strokeStyle = "#252a2a";
-    ctx.lineWidth = 1.3;
-    ctx.stroke();
+    // দুই পাশের পাঁজর
+    for (const side of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+
+      ctx.quadraticCurveTo(
+        spacing * 0.5,
+        side * ribLength * 0.5,
+        spacing * 0.8,
+        side * ribLength
+      );
+
+      ctx.lineWidth = 1.35;
+      ctx.strokeStyle = "#303535";
+      ctx.stroke();
+    }
 
     ctx.restore();
+  }
+}
 
-    if (i < 47 && i % 2 === 0) {
-      drawRibs(u, t);
+// অনেকগুলো পা পর্যায়ক্রমে নড়বে
+function drawLegs() {
+  for (let i = 3; i < snake.length - 3; i += 2) {
+    const p = snake[i];
+    const prev = snake[i - 1];
+    const next = snake[i + 1];
+
+    const angle = Math.atan2(
+      next.y - prev.y,
+      next.x - prev.x
+    );
+
+    const phase = time * 5 + i * 0.85;
+    const stride = Math.sin(phase) * spacing * 0.65;
+
+    for (const side of [-1, 1]) {
+      const nx = -Math.sin(angle) * side;
+      const ny = Math.cos(angle) * side;
+
+      const x1 = p.x + nx * bodyWidth * 0.6;
+      const y1 = p.y + ny * bodyWidth * 0.6;
+
+      const x2 = x1 + nx * spacing * 1.15
+                      + Math.cos(phase) * spacing * 0.3;
+
+      const y2 = y1 + ny * spacing * 1.15
+                      + Math.sin(phase) * spacing * 0.3;
+
+      const x3 = x2 + Math.cos(angle) * stride
+                      + nx * spacing * 0.45;
+
+      const y3 = y2 + Math.sin(angle) * stride
+                      + ny * spacing * 0.45;
+
+      drawLine(x1, y1, x2, y2, 1.5);
+      drawLine(x2, y2, x3, y3, 1.5);
+      drawJoint(x3, y3, 1.6);
     }
   }
-
-  // পা
-  for (let i = 0; i < 13; i++) {
-    const u = 0.025 + i * 0.071;
-
-    if (u > 0.94) continue;
-
-    drawLeg(u, -1, t, i);
-    drawLeg(u, 1, t, i + 3);
-  }
-
-  // মাথা
-  const head = spine(0, t);
-  joint(head.x, head.y, 4);
-
-  // সরু লেজ
-  const tail = spine(1, t);
-  line(tail.x, tail.y, tail.x + 12, tail.y - 1, 2);
 }
 
-// প্রাণীকে ক্যানভাসের মধ্যে রাখা
-function keepInside() {
-  if (!W || !H) return;
+// মাথা
+function drawHead() {
+  const p = snake[0];
 
-  const marginX = Math.min(W * 0.06, 35);
-  const marginY = Math.min(H * 0.06, 35);
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.rotate(headAngle);
 
-  const halfW = W * CREATURE_WIDTH / 2
-              + Math.min(W, H) * 0.06;
+  // মাথার আকৃতি
+  ctx.beginPath();
+  ctx.moveTo(bodyWidth * 2.1, 0);
+  ctx.lineTo(-bodyWidth * 0.8, -bodyWidth * 1.1);
+  ctx.lineTo(-bodyWidth * 1.4, 0);
+  ctx.lineTo(-bodyWidth * 0.8, bodyWidth * 1.1);
+  ctx.closePath();
 
-  const halfH = H * CREATURE_HEIGHT / 2
-              + Math.min(W, H) * 0.04;
+  ctx.fillStyle = "#292e2e";
+  ctx.fill();
+  ctx.strokeStyle = "#151919";
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
 
-  const minX = marginX + halfW - W / 2;
-  const maxX = W / 2 - marginX - halfW;
+  // চোখ
+  ctx.beginPath();
+  ctx.arc(0, -bodyWidth * 0.65, 1.5, 0, Math.PI * 2);
+  ctx.arc(0, bodyWidth * 0.65, 1.5, 0, Math.PI * 2);
+  ctx.fillStyle = "#f4f7f7";
+  ctx.fill();
 
-  const minY = marginY + halfH - H / 2;
-  const maxY = H / 2 - marginY - halfH;
-
-  creatureX = minX <= maxX
-    ? Math.max(minX, Math.min(maxX, creatureX))
-    : 0;
-
-  creatureY = minY <= maxY
-    ? Math.max(minY, Math.min(maxY, creatureY))
-    : 0;
+  ctx.restore();
 }
 
-// টাচ ও মাউস ড্র্যাগ
-canvas.addEventListener("pointerdown", (e) => {
-  dragging = true;
-  pointerId = e.pointerId;
-
-  const rect = canvas.getBoundingClientRect();
-
-  lastX = e.clientX - rect.left;
-  lastY = e.clientY - rect.top;
-
-  canvas.setPointerCapture(e.pointerId);
-  hint.textContent = "মুভ করতে ড্র্যাগ করো";
-});
-
-canvas.addEventListener("pointermove", (e) => {
-  if (!dragging || e.pointerId !== pointerId) return;
-
-  const rect = canvas.getBoundingClientRect();
-
-  const x = e.clientX - rect.left;
-  const y = e.clientY - rect.top;
-
-  creatureX += x - lastX;
-  creatureY += y - lastY;
-
-  lastX = x;
-  lastY = y;
-
-  keepInside();
-});
-
-function stopDragging(e) {
-  if (e.pointerId !== pointerId) return;
-
-  dragging = false;
-  pointerId = null;
-  hint.textContent = "আবার ড্র্যাগ করে মুভ করো";
-}
-
-canvas.addEventListener("pointerup", stopDragging);
-canvas.addEventListener("pointercancel", stopDragging);
-canvas.addEventListener("lostpointercapture", () => {
-  dragging = false;
-  pointerId = null;
-});
-
-// অ্যানিমেশন
 function animate() {
   ctx.clearRect(0, 0, W, H);
 
   time += 0.025;
 
-  ctx.save();
-
-  ctx.translate(
-    W / 2 + creatureX,
-    H / 2 + creatureY
-  );
-
-  drawCreature(time);
-
-  ctx.restore();
+  updateSnake();
+  drawBody();
+  drawLegs();
+  drawHead();
 
   requestAnimationFrame(animate);
 }
+
+window.addEventListener("resize", resize);
 
 resize();
 animate();
 </script>
 </body>
-  </html>
-  
+      </html>
+      
